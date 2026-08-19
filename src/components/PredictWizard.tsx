@@ -347,7 +347,7 @@ function SliderRow({
         min={min}
         max={max}
         step={1}
-        onValueChange={([next]) => onChange(next)}
+        onValueChange={(values) => onChange(values[0] ?? min)}
       />
     </div>
   );
