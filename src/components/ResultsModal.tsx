@@ -55,10 +55,7 @@ export function ResultsModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        showCloseButton={false}
-        className="max-h-[92vh] max-w-3xl overflow-hidden p-0 sm:max-w-3xl"
-      >
+      <DialogContent className="max-h-[92vh] max-w-3xl overflow-hidden p-0 sm:max-w-3xl">
         <div className="hero-gradient flex items-start justify-between gap-4 px-6 py-5">
           <div>
             <DialogTitle className="text-xl text-primary-foreground">
@@ -68,9 +65,7 @@ export function ResultsModal({
               {input.city}, {input.district} — {input.propertyType} ({input.transaction})
             </p>
           </div>
-          <Button variant="ghost" size="icon" onClick={() => onOpenChange(false)} aria-label="Close">
-            <span className="text-primary-foreground">✕</span>
-          </Button>
+          <div aria-hidden className="size-6" />
         </div>
 
         <Tabs defaultValue="prediction" className="max-h-[68vh] overflow-y-auto px-6 pb-6">
