@@ -83,10 +83,12 @@ export function todayISO() {
 
 /** Calls the trained Random Forest service and normalizes its response. */
 export async function fetchPrediction(input: PredictionInput): Promise<PredictionResult> {
-  const response = await fetch(`${PREDICT_API_URL}/predict`, {
-    method: "POST",
-    headers: { accept: "application/json", "Content-Type": "application/json" },
-    body: JSON.stringify({
+  let response: Response;
+  try {
+    response = await fetch(`${PREDICT_API_URL}/predict`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
       city: input.city,
       district: input.district,
       propty_type: input.propertyType,
