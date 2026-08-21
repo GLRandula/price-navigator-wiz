@@ -83,23 +83,30 @@ export function todayISO() {
 
 /** Calls the trained Random Forest service and normalizes its response. */
 export async function fetchPrediction(input: PredictionInput): Promise<PredictionResult> {
-  const response = await fetch(`${PREDICT_API_URL}/predict`, {
-    method: "POST",
-    headers: { accept: "application/json", "Content-Type": "application/json" },
-    body: JSON.stringify({
-      city: input.city,
-      district: input.district,
-      propty_type: input.propertyType,
-      posted_date: todayISO(),
-      lat: input.latitude,
-      lng: input.longitude,
-      size_house: input.houseSize,
-      size_land: input.landSize,
-      bed_rooms: input.bedrooms,
-      wc: input.bathrooms,
-      floors: input.floors,
-    }),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${PREDICT_API_URL}/predict`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        city: input.city,
+        district: input.district,
+        propty_type: input.propertyType,
+        posted_date: todayISO(),
+        lat: input.latitude,
+        lng: input.longitude,
+        size_house: input.houseSize,
+        size_land: input.landSize,
+        bed_rooms: input.bedrooms,
+        wc: input.bathrooms,
+        floors: input.floors,
+      }),
+    });
+  } catch {
+    throw new Error(
+      `Could not reach the model service at ${PREDICT_API_URL}. This is almost always a CORS issue: the browser sends a preflight "OPTIONS /predict" request first, and FastAPI answers 405 unless CORS is enabled. Add CORSMiddleware to your API (allow_origins, allow_methods, allow_headers = "*") and make sure the service is running.`,
+    );
+  }
 
   if (!response.ok) {
     const body = await response.text();
