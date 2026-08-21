@@ -13,14 +13,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
-import { predictPrice, type PredictionResult } from "@/lib/prediction";
-import {
-  DISTRICTS,
-  PROPERTY_TYPES,
-  TRANSACTION_TYPES,
-  type PropertyType,
-  type TransactionType,
-} from "@/lib/property-data";
+import { fetchPrediction, type PredictionResult } from "@/lib/prediction";
+import { DISTRICTS, PROPERTY_TYPES, type PropertyType } from "@/lib/property-data";
 
 const STEPS = [
   { title: "Regional Parameters", hint: "Where the property sits administratively" },
@@ -32,9 +26,8 @@ export function PredictWizard() {
   const [step, setStep] = useState(0);
   const [district, setDistrict] = useState("Colombo");
   const [city, setCity] = useState("Nugegoda");
-  const [transaction, setTransaction] = useState<TransactionType>("sales");
   const [propertyType, setPropertyType] = useState<PropertyType>("House");
-  const [houseSize, setHouseSize] = useState("12.5");
+  const [houseSize, setHouseSize] = useState("1700");
   const [landSize, setLandSize] = useState("15");
   const [bedrooms, setBedrooms] = useState(3);
   const [bathrooms, setBathrooms] = useState(2);
@@ -43,6 +36,8 @@ export function PredictWizard() {
   const [lng, setLng] = useState(79.8997);
   const [result, setResult] = useState<PredictionResult | null>(null);
   const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const cities = useMemo(
     () => DISTRICTS.find((d) => d.name === district)?.cities ?? [],
@@ -68,23 +63,33 @@ export function PredictWizard() {
     }
   }
 
-  function run() {
-    setResult(
-      predictPrice({
+  async function run() {
+    setLoading(true);
+    setError(null);
+    try {
+      const prediction = await fetchPrediction({
         district,
         city,
-        transaction,
         propertyType,
         houseSize: Number(houseSize) || 0,
         landSize: Number(landSize) || 0,
         bedrooms,
         bathrooms,
-        stories,
+        floors: stories,
         latitude: lat,
         longitude: lng,
-      }),
-    );
-    setOpen(true);
+      });
+      setResult(prediction);
+      setOpen(true);
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Could not reach the prediction service. Make sure it is running.",
+      );
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -166,25 +171,7 @@ export function PredictWizard() {
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Transaction Intent</Label>
-              <Select
-                value={transaction}
-                onValueChange={(v) => setTransaction(v as TransactionType)}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {TRANSACTION_TYPES.map((t) => (
-                    <SelectItem key={t} value={t}>
-                      {t}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Property Taxonomy</Label>
+              <Label>Property Type</Label>
               <Select
                 value={propertyType}
                 onValueChange={(v) => setPropertyType(v as PropertyType)}
@@ -208,12 +195,12 @@ export function PredictWizard() {
           <div className="grid gap-7 md:grid-cols-2">
             <div className="space-y-5">
               <div className="space-y-2">
-                <Label htmlFor="house-size">House Area Size (perch)</Label>
+                <Label htmlFor="house-size">House Area Size (sqft)</Label>
                 <Input
                   id="house-size"
                   type="number"
                   min="0"
-                  step="0.5"
+                  step="10"
                   value={houseSize}
                   onChange={(e) => setHouseSize(e.target.value)}
                 />
@@ -312,11 +299,21 @@ export function PredictWizard() {
             Continue
           </Button>
         ) : (
-          <Button onClick={run} className="bg-accent text-accent-foreground hover:bg-accent/90">
-            Run Valuation Pipeline
+          <Button
+            onClick={run}
+            disabled={loading}
+            className="bg-accent text-accent-foreground hover:bg-accent/90"
+          >
+            {loading ? "Running model…" : "Run Valuation Pipeline"}
           </Button>
         )}
       </div>
+
+      {error && (
+        <p className="border-t border-destructive/30 bg-destructive/8 px-6 py-3 text-sm text-destructive">
+          {error}
+        </p>
+      )}
 
       <ResultsModal result={result} open={open} onOpenChange={setOpen} />
     </div>

@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { formatCompact, formatLKR, type PredictionResult } from "@/lib/prediction";
+import { formatCompact, formatMoney, type PredictionResult } from "@/lib/prediction";
 
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
@@ -35,6 +35,15 @@ function ChartCard({ title, children }: { title: string; children: React.ReactNo
   );
 }
 
+const PROXIMITY_LABELS: Record<string, string> = {
+  school: "School",
+  hospital: "Hospital",
+  city: "City",
+  tourist_attraction: "Tourist",
+  main_road: "Main road",
+  flood_zone: "Flood zone",
+};
+
 export function ResultsModal({
   result,
   open,
@@ -45,13 +54,13 @@ export function ResultsModal({
   onOpenChange: (open: boolean) => void;
 }) {
   if (!result) return null;
-  const { input } = result;
-  const width = result.p90 - result.p10;
-  const medianPct = ((result.p50 - result.p10) / width) * 100;
-  const pointPct = Math.min(
-    100,
-    Math.max(0, ((result.predicted - result.p10) / width) * 100),
-  );
+  const { details, currency } = result;
+  const dims = details.dimensions;
+  const layout = details.layout;
+  const coords = details.coordinates;
+  const span = Math.max(result.p90 - result.p10, 1);
+  const medianPct = ((result.p50 - result.p10) / span) * 100;
+  const pointPct = Math.min(100, Math.max(0, ((result.predicted - result.p10) / span) * 100));
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -62,7 +71,7 @@ export function ResultsModal({
               Property Valuation Results
             </DialogTitle>
             <p className="mt-1 text-sm text-primary-foreground/75">
-              {input.city}, {input.district} — {input.propertyType} ({input.transaction})
+              {details.city}, {details.district} — {details.property_type} ({details.type})
             </p>
           </div>
           <div aria-hidden className="size-6" />
@@ -85,15 +94,15 @@ export function ResultsModal({
                 <div className="space-y-2">
                   <DetailRow
                     label="Dimensions"
-                    value={`${input.propertyType} ${input.houseSize}P · Land ${input.landSize}P`}
+                    value={`${details.property_type} ${dims.house_size} sqft · Land ${dims.land_size} ${dims.land_units}`}
                   />
                   <DetailRow
                     label="Layout"
-                    value={`${input.bedrooms} Bed · ${input.bathrooms} Bath · ${input.stories} Floor`}
+                    value={`${layout.bed_rooms} Bed · ${layout.bathrooms} Bath · ${layout.floors} Floor`}
                   />
                   <DetailRow
                     label="Coordinates"
-                    value={`(${input.latitude.toFixed(5)}, ${input.longitude.toFixed(5)})`}
+                    value={`(${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)})`}
                   />
                 </div>
               </div>
@@ -102,8 +111,10 @@ export function ResultsModal({
                 <div className="grid grid-cols-2 gap-x-6 gap-y-2 font-mono text-xs">
                   {Object.entries(result.proximity).map(([key, value]) => (
                     <div key={key} className="flex justify-between gap-2">
-                      <span className="capitalize text-muted-foreground">{key}:</span>
-                      <span className="text-foreground">{value.toFixed(2)}</span>
+                      <span className="text-muted-foreground">
+                        {PROXIMITY_LABELS[key] ?? key}:
+                      </span>
+                      <span className="text-foreground">{value.toFixed(4)}</span>
                     </div>
                   ))}
                 </div>
@@ -111,35 +122,35 @@ export function ResultsModal({
             </div>
 
             <div className="rounded-xl border border-success/35 bg-success/8 p-6 text-center">
-              <p className="section-label text-success">Random Forest Predicted Price</p>
+              <p className="section-label text-success">{result.model} Predicted Price</p>
               <p className="mt-2 font-display text-3xl font-bold text-success md:text-4xl">
-                {formatLKR(result.predicted)}
+                {formatMoney(result.predicted, currency)}
               </p>
             </div>
 
             <div className="rounded-xl border border-border">
               <div className="flex items-center justify-between border-b border-border bg-surface/60 px-4 py-3">
-                <p className="text-sm font-semibold">80% Prediction Interval</p>
+                <p className="text-sm font-semibold">{result.interval} Prediction Interval</p>
                 <Badge variant="secondary" className="bg-gold/25 text-gold-foreground">
-                  {result.confidence}
+                  {result.confidence} CONFIDENCE
                 </Badge>
               </div>
               <div className="divide-y divide-border">
                 <div className="flex justify-between px-4 py-3 text-sm text-muted-foreground">
                   <span>Lower Bound (P10)</span>
-                  <span>{formatLKR(result.p10)}</span>
+                  <span>{formatMoney(result.p10, currency)}</span>
                 </div>
                 <div className="flex justify-between bg-surface/40 px-4 py-3 text-sm font-semibold text-primary">
                   <span>Median (P50)</span>
-                  <span>{formatLKR(result.p50)}</span>
+                  <span>{formatMoney(result.p50, currency)}</span>
                 </div>
                 <div className="flex justify-between px-4 py-3 text-sm text-muted-foreground">
                   <span>Upper Bound (P90)</span>
-                  <span>{formatLKR(result.p90)}</span>
+                  <span>{formatMoney(result.p90, currency)}</span>
                 </div>
                 <div className="flex justify-between px-4 py-3 text-xs text-muted-foreground">
-                  <span>Width: {formatLKR(width)}</span>
-                  <span>{((width / result.p50) * 100).toFixed(1)}% of median</span>
+                  <span>Width: {formatMoney(result.width, currency)}</span>
+                  <span>{result.widthPct.toFixed(1)}% of median</span>
                 </div>
               </div>
             </div>
@@ -166,7 +177,7 @@ export function ResultsModal({
                 <span>{formatCompact(result.p90)}</span>
               </div>
               <p className="mt-3 text-center text-[11px] text-muted-foreground">
-                Diamond = Random Forest point estimate · Band = 80% interval
+                Diamond = {result.model} point estimate · Band = {result.interval} interval
               </p>
             </div>
 
@@ -175,12 +186,7 @@ export function ResultsModal({
                 <ResponsiveContainer>
                   <BarChart data={result.deviations} layout="vertical" margin={{ left: 10 }}>
                     <XAxis type="number" tick={{ fontSize: 10 }} />
-                    <YAxis
-                      type="category"
-                      dataKey="feature"
-                      width={92}
-                      tick={{ fontSize: 10 }}
-                    />
+                    <YAxis type="category" dataKey="feature" width={92} tick={{ fontSize: 10 }} />
                     <Tooltip formatter={(v: number) => `${v.toFixed(1)}%`} />
                     <Bar dataKey="value" radius={2}>
                       {result.deviations.map((entry) => (
@@ -196,7 +202,7 @@ export function ResultsModal({
                 </ResponsiveContainer>
               </ChartCard>
 
-              <ChartCard title={`Price Distribution in ${input.city}`}>
+              <ChartCard title={`Price Distribution in ${details.city}`}>
                 <ResponsiveContainer>
                   <BarChart data={result.histogram}>
                     <XAxis dataKey="bucket" tick={{ fontSize: 10 }} />
@@ -216,7 +222,7 @@ export function ResultsModal({
             </div>
 
             <ChartCard
-              title={`vs ${input.bedrooms}-BR ${input.propertyType} (${result.records.toLocaleString()} records)`}
+              title={`vs ${layout.bed_rooms}-BR ${details.property_type} (${result.records.toLocaleString()} records)`}
             >
               <ResponsiveContainer>
                 <BarChart data={result.benchmark}>
@@ -225,7 +231,7 @@ export function ResultsModal({
                     tick={{ fontSize: 10 }}
                     tickFormatter={(v: number) => `${(v / 1_000_000).toFixed(0)}M`}
                   />
-                  <Tooltip formatter={(v: number) => formatLKR(v)} />
+                  <Tooltip formatter={(v: number) => formatMoney(v, currency)} />
                   <Bar dataKey="value" radius={3}>
                     <LabelList
                       dataKey="value"

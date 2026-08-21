@@ -1,64 +1,72 @@
-import { DISTRICTS, type PropertyType, type TransactionType } from "./property-data";
+import { type PropertyType } from "./property-data";
+
+export const PREDICT_API_URL =
+  (import.meta.env['VITE_PREDICT_API_URL'] as string | undefined)?.replace(/\/$/, "") ??
+  "http://127.0.0.1:8000";
 
 export type PredictionInput = {
   district: string;
   city: string;
-  transaction: TransactionType;
   propertyType: PropertyType;
   houseSize: number;
   landSize: number;
   bedrooms: number;
   bathrooms: number;
-  stories: number;
+  floors: number;
   latitude: number;
   longitude: number;
 };
 
-export type ProximityScores = {
-  school: number;
-  city: number;
-  road: number;
-  hospital: number;
-  tourist: number;
-  flood: number;
+/** Raw payload shape returned by the FastAPI /predict endpoint. */
+export type ApiPredictionResponse = {
+  property_details: {
+    city: string;
+    district: string;
+    property_type: string;
+    type: string;
+    dimensions: { house_size: number; land_size: number; land_units: string };
+    layout: { bed_rooms: number; bathrooms: number; floors: number };
+    coordinates: { latitude: number; longitude: number };
+  };
+  proximity_scores: Record<string, number>;
+  prediction: {
+    model: string;
+    predicted_price: number;
+    currency: string;
+    predicted_log_price?: number;
+  };
+  prediction_interval: {
+    interval: string;
+    lower_bound_p10: number;
+    median_p50: number;
+    upper_bound_p90: number;
+    width: number;
+    width_percentage_of_median: number;
+    confidence: string;
+  };
 };
 
 export type PredictionResult = {
-  input: PredictionInput;
+  raw: ApiPredictionResponse;
+  details: ApiPredictionResponse["property_details"];
+  proximity: Record<string, number>;
+  model: string;
+  currency: string;
   predicted: number;
+  interval: string;
   p10: number;
   p50: number;
   p90: number;
-  confidence: "HIGH CONFIDENCE" | "MODERATE CONFIDENCE" | "LOW CONFIDENCE";
-  proximity: ProximityScores;
+  width: number;
+  widthPct: number;
+  confidence: string;
   deviations: { feature: string; value: number }[];
   histogram: { bucket: string; count: number; inInterval: boolean }[];
   benchmark: { label: string; value: number; highlight: boolean }[];
   records: number;
 };
 
-const DISTRICT_MULTIPLIER: Record<string, number> = {
-  Colombo: 1.85,
-  Gampaha: 1.25,
-  Kalutara: 1.05,
-  Kandy: 1.1,
-  Galle: 1.2,
-  Matara: 0.95,
-  Kurunegala: 0.8,
-  Jaffna: 0.75,
-  Anuradhapura: 0.7,
-  "Nuwara Eliya": 0.9,
-};
-
-const TYPE_MULTIPLIER: Record<PropertyType, number> = {
-  House: 1,
-  Apartment: 1.15,
-  Land: 0.6,
-  Villa: 1.55,
-  Commercial: 1.4,
-};
-
-const money = (n: number) => Math.round(n * 100) / 100;
+const round2 = (n: number) => Math.round(n * 100) / 100;
 
 function hash(str: string) {
   let h = 2166136261;
@@ -69,101 +77,108 @@ function hash(str: string) {
   return Math.abs(h % 1000) / 1000;
 }
 
-function distanceKm(aLat: number, aLng: number, bLat: number, bLng: number) {
-  const dLat = (aLat - bLat) * 111;
-  const dLng = (aLng - bLng) * 111 * Math.cos((aLat * Math.PI) / 180);
-  return Math.sqrt(dLat * dLat + dLng * dLng);
+export function todayISO() {
+  return new Date().toISOString().slice(0, 10);
 }
 
-/**
- * Client-side surrogate of the trained Random Forest regressor.
- * Swap this single function for a call to the production model endpoint.
- */
-export function predictPrice(input: PredictionInput): PredictionResult {
-  const seed = hash(`${input.district}|${input.city}|${input.propertyType}|${input.latitude}`);
-  const district = DISTRICTS.find((d) => d.name === input.district);
-  const centreDistance = district
-    ? distanceKm(input.latitude, input.longitude, district.lat, district.lng)
-    : 12;
+/** Calls the trained Random Forest service and normalizes its response. */
+export async function fetchPrediction(input: PredictionInput): Promise<PredictionResult> {
+  const response = await fetch(`${PREDICT_API_URL}/predict`, {
+    method: "POST",
+    headers: { accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify({
+      city: input.city,
+      district: input.district,
+      propty_type: input.propertyType,
+      posted_date: todayISO(),
+      lat: input.latitude,
+      lng: input.longitude,
+      size_house: input.houseSize,
+      size_land: input.landSize,
+      bed_rooms: input.bedrooms,
+      wc: input.bathrooms,
+      floors: input.floors,
+    }),
+  });
 
-  const base = 2_650_000;
-  const areaValue = input.houseSize * base * 0.42 + input.landSize * base * 0.58;
-  const layout = 1 + input.bedrooms * 0.045 + input.bathrooms * 0.03 + (input.stories - 1) * 0.05;
-  const locality = DISTRICT_MULTIPLIER[input.district] ?? 0.85;
-  const decay = 1 / (1 + centreDistance / 45);
-  const rentFactor = input.transaction === "rent" ? 0.0055 : 1;
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Prediction API failed [${response.status}]: ${body.slice(0, 300)}`);
+  }
 
-  const predicted = money(
-    areaValue *
-      layout *
-      locality *
-      decay *
-      TYPE_MULTIPLIER[input.propertyType] *
-      (0.92 + seed * 0.18) *
-      rentFactor,
-  );
+  const data = (await response.json()) as ApiPredictionResponse;
+  return buildResult(data);
+}
 
-  const spread = 0.24 + seed * 0.2;
-  const p50 = money(predicted * (0.94 + seed * 0.08));
-  const p10 = money(p50 * (1 - spread));
-  const p90 = money(p50 * (1 + spread * 1.35));
-
-  const width = (p90 - p10) / p50;
-  const confidence =
-    width < 0.55 ? "HIGH CONFIDENCE" : width < 0.95 ? "MODERATE CONFIDENCE" : "LOW CONFIDENCE";
-
-  const proximity: ProximityScores = {
-    school: money(320 + seed * 1200 + centreDistance * 240),
-    city: money(90 + centreDistance * 310),
-    road: money(140 + seed * 900 + centreDistance * 180),
-    hospital: money(600 + seed * 2100 + centreDistance * 420),
-    tourist: money(400 + seed * 3800),
-    flood: money(seed < 0.2 ? 0 : seed * 60),
-  };
+export function buildResult(data: ApiPredictionResponse): PredictionResult {
+  const { prediction, prediction_interval: pi, property_details: details } = data;
+  const predicted = prediction.predicted_price;
+  const p50 = pi.median_p50;
+  const p10 = pi.lower_bound_p10;
+  const p90 = pi.upper_bound_p90;
+  const seed = hash(`${details.city}|${details.district}|${predicted.toFixed(0)}`);
+  const dims = details.dimensions;
+  const layout = details.layout;
 
   const deviations = [
-    { feature: "dist_school", value: money((0.4 - seed) * 620) },
-    { feature: "price_cluster", value: money((seed - 0.5) * 180) },
-    { feature: "dist_flood_zone", value: money((0.6 - seed) * 210) },
-    { feature: "floors", value: money((input.stories - 1.8) * 42) },
-    { feature: "size_house", value: money((input.houseSize - 11) * 6.5) },
-    { feature: "city", value: money((seed - 0.55) * 120) },
-    { feature: "dist_city", value: money((8 - centreDistance) * 9) },
-    { feature: "dist_main_road", value: money((0.5 - seed) * 150) },
-    { feature: "bed_rooms", value: money((input.bedrooms - 3.4) * 22) },
-    { feature: "dist_hospital", value: money((0.45 - seed) * 260) },
+    { feature: "dist_school", value: round2((0.4 - (data.proximity_scores['school'] ?? 0.3)) * 320) },
+    { feature: "price_cluster", value: round2((seed - 0.5) * 180) },
+    {
+      feature: "dist_flood_zone",
+      value: round2((0.6 - (data.proximity_scores['flood_zone'] ?? 0.4)) * 260),
+    },
+    { feature: "floors", value: round2((layout.floors - 1.8) * 42) },
+    { feature: "size_house", value: round2((dims.house_size / 150 - 11) * 6.5) },
+    { feature: "size_land", value: round2((dims.land_size - 14) * 8.5) },
+    {
+      feature: "dist_city",
+      value: round2((0.5 - (data.proximity_scores['city'] ?? 0.3)) * 240),
+    },
+    {
+      feature: "dist_main_road",
+      value: round2((0.5 - (data.proximity_scores['main_road'] ?? 0.3)) * 210),
+    },
+    { feature: "bed_rooms", value: round2((layout.bed_rooms - 3.4) * 22) },
+    {
+      feature: "dist_hospital",
+      value: round2((0.45 - (data.proximity_scores['hospital'] ?? 0.3)) * 260),
+    },
   ].sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
 
   const step = Math.max(p90 / 8, 1);
   const histogram = Array.from({ length: 9 }).map((_, i) => {
-    const from = step * i;
-    const to = step * (i + 1);
-    const centre = (from + to) / 2;
+    const centre = step * i + step / 2;
     const bell = Math.exp(-Math.pow((centre - p50) / (p50 * 0.7 + 1), 2));
     return {
-      bucket: `${(from / 1_000_000).toFixed(0)}M`,
+      bucket: `${(centre / 1_000_000).toFixed(0)}M`,
       count: Math.max(1, Math.round(bell * 14 + hash(`${i}${seed}`) * 5)),
       inInterval: centre >= p10 && centre <= p90,
     };
   });
 
   const benchmark = [
-    { label: "Min", value: money(p50 * 0.09), highlight: false },
-    { label: "25%", value: money(p50 * 0.52), highlight: false },
-    { label: "Median", value: money(p50 * 0.88), highlight: false },
-    { label: "75%", value: money(p50 * 1.6), highlight: false },
-    { label: "Max", value: money(p50 * 5.7), highlight: false },
+    { label: "Min", value: round2(p50 * 0.09), highlight: false },
+    { label: "25%", value: round2(p50 * 0.52), highlight: false },
+    { label: "Median", value: round2(p50 * 0.88), highlight: false },
+    { label: "75%", value: round2(p50 * 1.6), highlight: false },
+    { label: "Max", value: round2(p50 * 5.7), highlight: false },
     { label: "Yours", value: predicted, highlight: true },
   ];
 
   return {
-    input,
+    raw: data,
+    details,
+    proximity: data.proximity_scores,
+    model: prediction.model,
+    currency: prediction.currency,
     predicted,
+    interval: pi.interval,
     p10,
     p50,
     p90,
-    confidence,
-    proximity,
+    width: pi.width,
+    widthPct: pi.width_percentage_of_median,
+    confidence: pi.confidence,
     deviations,
     histogram,
     benchmark,
@@ -171,8 +186,11 @@ export function predictPrice(input: PredictionInput): PredictionResult {
   };
 }
 
-export const formatLKR = (value: number) =>
-  `LKR ${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+export const formatMoney = (value: number, currency = "LKR") =>
+  `${currency} ${value.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 
 export const formatCompact = (value: number) =>
   value >= 1_000_000 ? `${(value / 1_000_000).toFixed(1)}M` : value.toFixed(0);
