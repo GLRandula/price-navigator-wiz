@@ -1,7 +1,7 @@
 import { type PropertyType } from "./property-data";
 
 export const PREDICT_API_URL =
-  (import.meta.env.VITE_PREDICT_API_URL as string | undefined)?.replace(/\/$/, "") ??
+  (import.meta.env['VITE_PREDICT_API_URL'] as string | undefined)?.replace(/\/$/, "") ??
   "http://127.0.0.1:8000";
 
 export type PredictionInput = {
@@ -121,27 +121,27 @@ export function buildResult(data: ApiPredictionResponse): PredictionResult {
   const layout = details.layout;
 
   const deviations = [
-    { feature: "dist_school", value: round2((0.4 - (data.proximity_scores.school ?? 0.3)) * 320) },
+    { feature: "dist_school", value: round2((0.4 - (data.proximity_scores['school'] ?? 0.3)) * 320) },
     { feature: "price_cluster", value: round2((seed - 0.5) * 180) },
     {
       feature: "dist_flood_zone",
-      value: round2((0.6 - (data.proximity_scores.flood_zone ?? 0.4)) * 260),
+      value: round2((0.6 - (data.proximity_scores['flood_zone'] ?? 0.4)) * 260),
     },
     { feature: "floors", value: round2((layout.floors - 1.8) * 42) },
     { feature: "size_house", value: round2((dims.house_size / 150 - 11) * 6.5) },
     { feature: "size_land", value: round2((dims.land_size - 14) * 8.5) },
     {
       feature: "dist_city",
-      value: round2((0.5 - (data.proximity_scores.city ?? 0.3)) * 240),
+      value: round2((0.5 - (data.proximity_scores['city'] ?? 0.3)) * 240),
     },
     {
       feature: "dist_main_road",
-      value: round2((0.5 - (data.proximity_scores.main_road ?? 0.3)) * 210),
+      value: round2((0.5 - (data.proximity_scores['main_road'] ?? 0.3)) * 210),
     },
     { feature: "bed_rooms", value: round2((layout.bed_rooms - 3.4) * 22) },
     {
       feature: "dist_hospital",
-      value: round2((0.45 - (data.proximity_scores.hospital ?? 0.3)) * 260),
+      value: round2((0.45 - (data.proximity_scores['hospital'] ?? 0.3)) * 260),
     },
   ].sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
 
